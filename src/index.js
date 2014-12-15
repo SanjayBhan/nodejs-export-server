@@ -38,6 +38,12 @@ var app = new express ();
 var bodyParser = require('body-parser');
 var fs = require ('fs');
 var path = require ('path');
+var querystring = require('querystring');
+
+// The config file
+var config = JSON.parse(fs.readFileSync (path.resolve (__dirname, '../', 'config.json')));
+var rootPath = path.resolve (__dirname, '../');
+var savePath = path.resolve (rootPath, config.fileSavePath);
 
 // Content Types for all the file types
 var contentType = {
@@ -56,6 +62,8 @@ var exportAs = {
     'jpg': '--export-png',
 };
 
+app.use ('/ExportedImages/', express.static(savePath));
+
 app.use( bodyParser.json());
 
 app.use(bodyParser.urlencoded({
@@ -66,13 +74,10 @@ app.use(bodyParser.urlencoded({
 app.post('/', function (req, res) {
     doExport (req, res);
 });
-
-// The config file
-var config = JSON.parse(fs.readFileSync (path.resolve (__dirname, '../', 'config.json')));
-var rootPath = path.resolve (__dirname, '../');
-var savePath = path.resolve (rootPath, config.fileSavePath);
-// The fileNo increases linearly whenever a file is saved to the server
-var fileNo = 0;
+// We need to override the escape function so that it doesn't escape the generated response for save
+querystring.escape = function (str) {
+    return str;
+}
 
 console.log ('Starting the exporter on port ' + config.port);
 console.log ('File save path set as `' + savePath + '`');
@@ -83,7 +88,8 @@ app.listen (config.port);
 // Main export function
 function doExport (req, res) {
     var params = parseParams (req.body),
-        filename = params.parameters.exportfilename + '.' + params.parameters.exportformat;
+        filename = params.parameters.exportfilename + '.' + params.parameters.exportformat,
+        returnedObj = {};
 
     inkscape = new Inkscape ([exportAs[params.parameters.exportformat], '--export-width=' + params.width, '--export-height=' + params.height]);
     /**
@@ -113,19 +119,32 @@ function doExport (req, res) {
          */
         fs.writeFileSync (__dirname + '/tmp.svg', params.svg, 'utf-8');
         res.writeHead (200, {'Content-Type': 'text/html'});
+        if(fs.existsSync (path.resolve(savePath, filename))) {
+            filename = params.parameters.exportfilename + '_' + Date.now ().toString (32) + '.' + params.parameters.exportformat; 
+            returnedObj.notice = 'File already exists. Using intelligent naming of file by adding an unique suffix to the exising name. The filename has changed to ' + filename;            
+        }
+        returnedObj.DOMId = params.DOMID;
+        returnedObj.width = params.width;
+        returnedObj.height = params.height;
+        returnedObj.filename = 'ExportedImages/' + filename;
+        returnedObj.statusMessage = 'success';
+        returnedObj.statusCode = '1';
         if(params.parameters.exportformat === 'jpg' || params.parameters.exportformat === 'jpeg') {
-            im.convert ([path.resolve(__dirname, 'tmp.svg'), path.resolve(savePath, (fileNo ++) + '.jpg')], function (err, stdout) {
+            im.convert ([path.resolve(__dirname, 'tmp.svg'), path.resolve(savePath, filename)], function (err, stdout) {
                 if(!err) {
-                    res.end ('{status: true}');
+                    res.end (querystring.stringify(returnedObj, '&'));
                 } else {
                     console.log (err);
-                    res.end ('{status: false}');
+                    res.end (querystring.stringify({
+                        statusCode: '0',
+                        statusMessage: err
+                    }, '&'));
                 }
             });
         } else {
             fs.createReadStream(path.resolve(__dirname, 'tmp.svg'))
-                .pipe(inkscape).pipe (fs.createWriteStream(savePath + '/' + (fileNo ++) + '.' + params.parameters.exportformat));    
-                res.end ('{status: true}');
+                .pipe(inkscape).pipe (fs.createWriteStream(savePath + '/' + filename));
+                res.end (querystring.stringify(returnedObj, '&'));
         }
     }
 }
@@ -133,7 +152,6 @@ function doExport (req, res) {
  * parseParams function is used to convert the parameters object to an Object.
  */
 function parseParams (paramsObject) {
-    console.log (paramsObject);
     var returnedObj = {},
         params = paramsObject.parameters.replace(/\|/g, '&');
         
@@ -145,7 +163,7 @@ function parseParams (paramsObject) {
     returnedObj.width = +paramsObject.meta_width;
     returnedObj.height = +paramsObject.meta_height;
 
-    returnedObj.parameters = require('querystring').parse(params);
+    returnedObj.parameters = querystring.parse(params);
 
     return returnedObj;
 }
