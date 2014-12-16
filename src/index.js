@@ -97,7 +97,7 @@ function doExport (req, res) {
      * The exception is jpeg, which cannot be created by inkscape. So instead it is converted to png and ImageMagick is used to convert it to jpeg
      * The Content-Disposition is set to attachment to trigger a file download
      */
-    if(params.parameters.exportAction === 'download') {
+    if(params.parameters.exportaction === 'download') {
         res.writeHead(200, {'Content-Type': contentType[params.parameters.exportformat], 'Content-Disposition': 'attachment; filename=' + filename});
         fs.writeFileSync (__dirname + '/tmp.svg', params.svg, 'utf-8');
         if(params.parameters.exportformat === 'jpg' || params.parameters.exportformat === 'jpeg') {
